@@ -1,0 +1,17 @@
+[package]
+name = "rs-plugin-lookup-jackett"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate_type = ["cdylib"]
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+extism-pdk = "1.1.0"
+rs-plugin-common-interfaces = "0.5.0"
+plugin-request-interfaces = "0.8.2"
+rs-plugin-lookup-interfaces = "0.2.0"
+serde = "1.0.197"
+strum = "0.26.2"
+strum_macros = "0.26.2"
