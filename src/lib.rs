@@ -4,8 +4,11 @@ use extism_pdk::{http, info, plugin_fn, FnResult, HttpRequest, Json, WithReturnC
 use plugin_request_interfaces::{RsRequest, RsRequestStatus};
 use rs_plugin_common_interfaces::{CredentialType, PluginInformation, PluginType};
 use rs_plugin_lookup_interfaces::{RsLookupQuery, RsLookupResult, RsLookupWrapper};
+use rs_torrent_magnet::magnet_from_torrent;
 use serde::{Deserialize, Serialize};
+
 use urlencoding::encode;
+use unidecode::unidecode;
 
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Default)]
@@ -18,8 +21,10 @@ pub struct JackettResults {
 #[serde(rename_all = "PascalCase")] 
 pub struct JackettResult {
     pub title: String,
+    pub tracker: Option<String>,
     pub link: Option<String>,
     pub magnet_uri: Option<String>,
+    pub size: Option<u64>,
     pub seeders: u64,
     pub tmdb: Option<u64>,
     pub imdb: Option<String>
@@ -27,10 +32,29 @@ pub struct JackettResult {
 
 impl From<JackettResult> for RsRequest {
     fn from(value: JackettResult) -> Self {
-        RsRequest { upload_id: None, url: value.magnet_uri.or(value.link).unwrap_or("".to_owned()), mime: Some("applications/x-bittorrent".to_owned()), size: None, filename: Some(value.title), status: RsRequestStatus::Unprocessed, ..Default::default() }
+        let url = if let Some(magnet) = value.magnet_uri {
+            magnet
+        } else if let Some(url) = value.link {
+            let request = HttpRequest {
+                url,
+                headers: Default::default(),
+                method: Some("GET".into()),
+            };
+            let res = http::request::<()>(&request, None);
+            if let Ok(res) = res {
+                let encoded = res.body();
+                magnet_from_torrent(encoded)
+            } else {
+                "".to_owned()
+            }
+        } else {
+            "".to_owned()
+        };
+        let mut request = RsRequest { upload_id: None, url, mime: Some("applications/x-bittorrent".to_owned()), size: value.size, filename: Some(value.title), referer: value.tracker, status: RsRequestStatus::Unprocessed, ..Default::default() };
+        request.parse_filename();
+        request
     }
 }
-
 
 #[plugin_fn]
 pub fn infos() -> FnResult<Json<PluginInformation>> {
@@ -38,6 +62,7 @@ pub fn infos() -> FnResult<Json<PluginInformation>> {
         PluginInformation { name: "jackett_lookup".into(), kind: PluginType::Lookup, version: 1, publisher: "neckaros".into(), description: "fetch possible movies or episode with the Jackett API".into(), credential_kind: Some(CredentialType::Token), ..Default::default() }
     ))
 }
+
 
 pub fn get_request(url: Option<&str>, token: String, params: HashMap<&str, String>) -> HttpRequest {
     let url = url.unwrap_or("http://127.0.0.1:9117/api/v2.0/indexers/all/results");
@@ -56,9 +81,9 @@ pub fn process(Json(lookup): Json<RsLookupWrapper>) -> FnResult<Json<RsLookupRes
     if let Some(token) = lookup.credential.and_then(|l| l.password) {
         if let RsLookupQuery::Episode(episode_query) = lookup.query {
             let q =  if let Some(number) = episode_query.number {
-                format!("{} s{:02}e{:02}", episode_query.serie, episode_query.season, number)
+                format!("{} s{:02}e{:02}", unidecode(&episode_query.serie), episode_query.season, number)
             } else {
-                format!("{} s{:02}", episode_query.serie, episode_query.season)
+                format!("{} s{:02}", unidecode(&episode_query.serie), episode_query.season)
             };
             let params = HashMap::from([("t", "tvsearch".to_owned()),("Query", q)]);
             /*if let Some(episode) = episode_query.number {
