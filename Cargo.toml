@@ -9,7 +9,7 @@ crate_type = ["cdylib"]
 
 [dependencies]
 extism-pdk = "1.1.0"
-rs-plugin-common-interfaces = "0.15.7"
+rs-plugin-common-interfaces = "0.17.9"
 serde = "1.0.197"
 strum = "0.26.2"
 strum_macros = "0.26.2"
