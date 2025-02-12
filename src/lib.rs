@@ -1,21 +1,34 @@
 use std::collections::HashMap;
 
+use error::JackettError;
 use extism_pdk::{http, info, plugin_fn, FnResult, HttpRequest, Json, WithReturnCode};
-use plugin_request_interfaces::{RsRequest, RsRequestStatus};
-use rs_plugin_common_interfaces::{CredentialType, PluginInformation, PluginType};
-use rs_plugin_lookup_interfaces::{RsLookupQuery, RsLookupResult, RsLookupWrapper};
+
+use rs_plugin_common_interfaces::{lookup::{RsLookupQuery, RsLookupSourceResult, RsLookupWrapper}, request::{RsRequest, RsRequestPluginRequest, RsRequestStatus}, CredentialType, PluginInformation, PluginType};
 use rs_torrent_magnet::magnet_from_torrent;
 use serde::{Deserialize, Serialize};
 
 use urlencoding::encode;
 use unidecode::unidecode;
 
+pub mod error;
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Default)]
 #[serde(rename_all = "PascalCase")] 
 pub struct JackettResults {
     pub results: Vec<JackettResult>,
 }
+
+impl JackettResults {
+    pub fn censor(&mut self, token: &str) {
+        for result in &mut self.results {
+            if let Some(link) = &mut result.link {
+                result.link = Some(link.replace(token, ""));
+            }
+        }
+    }
+}
+
+const JACKET_MIME: &str = "jackett/torrent";
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Default)]
 #[serde(rename_all = "PascalCase")] 
@@ -30,36 +43,26 @@ pub struct JackettResult {
     pub imdb: Option<String>
 }
 
-impl From<JackettResult> for RsRequest {
-    fn from(value: JackettResult) -> Self {
-        let url = if let Some(magnet) = value.magnet_uri {
-            magnet
+impl TryFrom<JackettResult> for RsRequest {
+    type Error = JackettError;
+    
+    fn try_from(value: JackettResult) -> Result<Self, JackettError> {
+        let mut request = if let Some(magnet) = value.magnet_uri {
+            RsRequest { upload_id: None, url: magnet, mime: Some("applications/x-bittorrent".to_owned()), size: value.size, filename: Some(value.title), referer: value.tracker, status: RsRequestStatus::Unprocessed, permanent: true, ..Default::default() }
         } else if let Some(url) = value.link {
-            let request = HttpRequest {
-                url,
-                headers: Default::default(),
-                method: Some("GET".into()),
-            };
-            let res = http::request::<()>(&request, None);
-            if let Ok(res) = res {
-                let encoded = res.body();
-                magnet_from_torrent(encoded)
-            } else {
-                "".to_owned()
-            }
+            RsRequest { upload_id: None, url, mime: Some(JACKET_MIME.to_owned()), size: value.size, filename: Some(value.title), referer: value.tracker, status: RsRequestStatus::Unprocessed, permanent: false, ..Default::default() }
         } else {
-            "".to_owned()
+            return Err(JackettError::NoLink(value))
         };
-        let mut request = RsRequest { upload_id: None, url, mime: Some("applications/x-bittorrent".to_owned()), size: value.size, filename: Some(value.title), referer: value.tracker, status: RsRequestStatus::Unprocessed, ..Default::default() };
         request.parse_filename();
-        request
+        Ok(request)
     }
 }
 
 #[plugin_fn]
 pub fn infos() -> FnResult<Json<PluginInformation>> {
     Ok(Json(
-        PluginInformation { name: "jackett_lookup".into(), kind: PluginType::Lookup, version: 1, publisher: "neckaros".into(), description: "fetch possible movies or episode with the Jackett API".into(), credential_kind: Some(CredentialType::Token), ..Default::default() }
+        PluginInformation { name: "jackett_lookup".into(), capabilities: vec![PluginType::Lookup, PluginType::Request], version: 1, interface_version: 1, publisher: "neckaros".into(), description: "fetch possible movies or episode with the Jackett API".into(), credential_kind: Some(CredentialType::Token), ..Default::default() }
     ))
 }
 
@@ -77,7 +80,7 @@ pub fn get_request(url: Option<&str>, token: String, params: HashMap<&str, Strin
 }
 
 #[plugin_fn]
-pub fn process(Json(lookup): Json<RsLookupWrapper>) -> FnResult<Json<RsLookupResult>> {
+pub fn lookup(Json(lookup): Json<RsLookupWrapper>) -> FnResult<Json<RsLookupSourceResult>> {
     if let Some(token) = lookup.credential.and_then(|l| l.password) {
         if let RsLookupQuery::Episode(episode_query) = lookup.query {
             let q =  if let Some(number) = episode_query.number {
@@ -86,55 +89,38 @@ pub fn process(Json(lookup): Json<RsLookupWrapper>) -> FnResult<Json<RsLookupRes
                 format!("{} s{:02}", unidecode(&episode_query.serie), episode_query.season)
             };
             let params = HashMap::from([("t", "tvsearch".to_owned()),("Query", q)]);
-            /*if let Some(episode) = episode_query.number {
-                params.insert("ep", episode.to_string());
-            }
-            
-            if let Some(tmdb) = episode_query.tmdb {
-                params.insert("tmdbid", tmdb.to_string());
-            }
-            if let Some(imdb) = episode_query.imdb {
-                params.insert("imdbid", imdb);
-            }
-            if let Some(trakt) = episode_query.trakt {
-                params.insert("traktid", trakt.to_string());
-            }
-            if let Some(tvdb) = episode_query.tvdb {
-                params.insert("tvdbid", tvdb.to_string());
-            }*/
-            let request = get_request(None, token, params);
+
+            let request = get_request(None, token.clone(), params);
 
             let res = http::request::<()>(&request, None);
             if let Ok(res) = res {
                 let r: JackettResults = res.json()?;
-                let requests: Vec<RsRequest> = r.results.into_iter().map(|t| RsRequest::from(t)).collect();
-                Ok(Json(RsLookupResult::Requests(requests)))
+                let requests: Vec<RsRequest> = r.results.into_iter().filter_map(|t| RsRequest::try_from(t).ok()).map(|mut r| {
+                    r.url = r.url.replace(&token, "#token#");
+                    r
+                } ).collect();
+                Ok(Json(RsLookupSourceResult::Requests(requests)))
             } else {
                 Err(WithReturnCode(res.err().unwrap(), 500))
             }
         } else if let RsLookupQuery::Movie(movie_query) = lookup.query {
-            let mut params = HashMap::from([("t", "movie".to_owned()), ("q", movie_query.name)]);
-            if let Some(tmdb) = movie_query.tmdb {
-                params.insert("tmdbid", tmdb.to_string());
-            }
-            if let Some(imdb) = movie_query.imdb {
-                params.insert("imdbid", imdb);
-            }
-            if let Some(trakt) = movie_query.trakt {
-                params.insert("traktid", trakt.to_string());
-            }
-            let request = get_request(None, token, params);
+            let params = HashMap::from([("t", "movie".to_owned()), ("Query", unidecode(&movie_query.name))]);
+            
+            let request = get_request(None, token.clone(), params);
 
             let res = http::request::<()>(&request, None);
             if let Ok(res) = res {
                 let r: JackettResults = res.json()?;
-                let requests: Vec<RsRequest> = r.results.into_iter().map(|t| RsRequest::from(t)).collect();
-                Ok(Json(RsLookupResult::Requests(requests)))
+                let requests: Vec<RsRequest> = r.results.into_iter().filter_map(|t| RsRequest::try_from(t).ok()).map(|mut r| {
+                    r.url = r.url.replace(&token, "#token#");
+                    r
+                } ).collect();
+                Ok(Json(RsLookupSourceResult::Requests(requests)))
             } else {
                 Err(WithReturnCode(res.err().unwrap(), 500))
             }
         } else {
-            Ok(Json(RsLookupResult::NotApplicable))
+            Ok(Json(RsLookupSourceResult::NotApplicable))
         }
         
     } else {
@@ -142,13 +128,74 @@ pub fn process(Json(lookup): Json<RsLookupWrapper>) -> FnResult<Json<RsLookupRes
     }
 }
 
+
+
+#[plugin_fn]
+pub fn process(Json(request): Json<RsRequestPluginRequest>) -> FnResult<Json<RsRequest>> {
+    if request.request.mime == Some(JACKET_MIME.to_owned()) {
+        if let Some(token) = request.credential.and_then(|l| l.password) {
+            let httprequest = HttpRequest {
+                url: request.request.url.replace("#token#", token.as_str()),
+                headers: Default::default(),
+                method: Some("GET".into()),
+            };
+            let res = http::request::<()>(&httprequest, None);
+            if let Ok(res) = res {
+                let encoded = res.body();
+                let magnet = magnet_from_torrent(encoded);
+                let mut final_request = request.request.clone();
+                final_request.url = magnet;
+                final_request.status = RsRequestStatus::Intermediate;
+                final_request.permanent = true;
+                final_request.mime = Some("applications/x-bittorrent".to_owned());
+                Ok(Json(final_request))
+            } else {
+                Err(WithReturnCode::new(extism_pdk::Error::msg("Not supported"), 404))
+            }
+        } else {
+            Err(WithReturnCode::new(extism_pdk::Error::msg("Need token"), 401))
+        }
+    } else {
+        Err(WithReturnCode::new(extism_pdk::Error::msg("Not supported"), 404))
+    }
+}
+
+
+#[plugin_fn]
+pub fn request_permanent(Json(request): Json<RsRequestPluginRequest>) -> FnResult<Json<RsRequest>> {
+    if request.request.mime == Some(JACKET_MIME.to_owned()) {
+        if let Some(token) = request.credential.and_then(|l| l.password) {
+            let httprequest = HttpRequest {
+                url: request.request.url.replace("#token#", token.as_str()),
+                headers: Default::default(),
+                method: Some("GET".into()),
+            };
+            let res = http::request::<()>(&httprequest, None);
+            if let Ok(res) = res {
+                let encoded = res.body();
+                let magnet = magnet_from_torrent(encoded);
+                let mut final_request = request.request.clone();
+                final_request.url = magnet;
+                final_request.status = RsRequestStatus::Unprocessed;
+                final_request.permanent = true;
+                final_request.mime = Some("applications/x-bittorrent".to_owned());
+                Ok(Json(final_request))
+            } else {
+                Err(WithReturnCode::new(extism_pdk::Error::msg("Not supported"), 404))
+            }
+        } else {
+            Err(WithReturnCode::new(extism_pdk::Error::msg("Need token"), 401))
+        }
+    } else {
+        Err(WithReturnCode::new(extism_pdk::Error::msg("Not supported"), 404))
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use wasm_bindgen_test::wasm_bindgen_test;
-
     use super::*;
 
-    #[wasm_bindgen_test]
+    #[test]
     fn request() {
         let request = get_request(None, "testtoken".to_owned(), HashMap::from([("testparam1", "A".to_owned()), ("testparam2", "B".to_owned())]));
 

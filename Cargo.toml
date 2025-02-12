@@ -9,14 +9,12 @@ crate_type = ["cdylib"]
 
 [dependencies]
 extism-pdk = "1.1.0"
-rs-plugin-common-interfaces = "0.11.0"
-plugin-request-interfaces = "0.11.0"
-rs-plugin-lookup-interfaces = "0.11.0"
+rs-plugin-common-interfaces = "0.15.7"
 serde = "1.0.197"
 strum = "0.26.2"
 strum_macros = "0.26.2"
 urlencoding = "2.1.3"
-rs_torrent_magnet = "0.1.0"
+rs_torrent_magnet = "0.2.0"
 unidecode = "0.3.0"
 
 [dev-dependencies]

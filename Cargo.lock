@@ -230,12 +230,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "95505c38b4572b2d910cecb0281560f54b440a19336cbbcb27bf6ce6adc6f5a8"
 
 [[package]]
-name = "hex"
-version = "0.4.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
-
-[[package]]
 name = "indexmap"
 version = "2.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -330,20 +324,6 @@ name = "paste"
 version = "1.0.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "de3145af08024dea9fa9914f381a17b8fc6034dfb00f3a84013f7ff43f29ed4c"
-
-[[package]]
-name = "plugin-request-interfaces"
-version = "0.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a80546d485be4c7b95ef90c2420071ade2abcfa081f8ea3a4638aff574c02403"
-dependencies = [
- "regex",
- "rs-plugin-common-interfaces",
- "serde",
- "serde_json",
- "strum",
- "strum_macros",
-]
 
 [[package]]
 name = "proc-macro-crate"
@@ -459,24 +439,11 @@ dependencies = [
 
 [[package]]
 name = "rs-plugin-common-interfaces"
-version = "0.11.0"
+version = "0.15.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fb57a7889b1fa8a92dfe4561af66a5d0e5a666c9bf2635f74e56de953d713006"
+checksum = "e9144a92d5e212477596835eb60c937675c706ca63eab7df1418dee83ef9af97"
 dependencies = [
- "serde",
- "serde_json",
- "strum",
- "strum_macros",
-]
-
-[[package]]
-name = "rs-plugin-lookup-interfaces"
-version = "0.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0bdfd162d3f3b7db301acf616774900430c8c7e2dc734b60d9a1bfe16a61d592"
-dependencies = [
- "plugin-request-interfaces",
- "rs-plugin-common-interfaces",
+ "regex",
  "serde",
  "serde_json",
  "strum",
@@ -488,9 +455,7 @@ name = "rs-plugin-lookup-jackett"
 version = "0.1.0"
 dependencies = [
  "extism-pdk",
- "plugin-request-interfaces",
  "rs-plugin-common-interfaces",
- "rs-plugin-lookup-interfaces",
  "rs_torrent_magnet",
  "serde",
  "strum",
@@ -502,13 +467,12 @@ dependencies = [
 
 [[package]]
 name = "rs_torrent_magnet"
-version = "0.1.0"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "18426f37165271b8800c3f47791e213763e580c29927a71e242a28e4d9548bcd"
+checksum = "a0978e36144a25f82555354c14f8bbdea85be3ebd87ae1555d273232623c7819"
 dependencies = [
  "bt_bencode",
  "data-encoding",
- "hex",
  "serde",
  "sha1",
  "urlencoding",
