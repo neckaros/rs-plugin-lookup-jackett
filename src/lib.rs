@@ -1,9 +1,11 @@
 use std::collections::HashMap;
 
 use error::JackettError;
-use extism_pdk::{http, info, log, plugin_fn, FnResult, HttpRequest, Json, LogLevel, WithReturnCode};
+use extism_pdk::{http, log, plugin_fn, FnResult, HttpRequest, Json, LogLevel, WithReturnCode};
+#[cfg(target_arch = "wasm32")]
+use extism_pdk::info;
 
-use rs_plugin_common_interfaces::{lookup::{RsLookupQuery, RsLookupSourceResult, RsLookupWrapper}, request::{RsRequest, RsRequestPluginRequest, RsRequestStatus}, CredentialType, PluginInformation, PluginType};
+use rs_plugin_common_interfaces::{lookup::{RsLookupQuery, RsLookupSourceResult, RsLookupWrapper}, request::{RsRequest, RsRequestPluginRequest, RsRequestStatus}, CredentialType, CustomParam, CustomParamTypes, PluginInformation, PluginType};
 use rs_torrent_magnet::magnet_from_torrent;
 use serde::{Deserialize, Serialize};
 
@@ -29,6 +31,7 @@ impl JackettResults {
 }
 
 const JACKET_MIME: &str = "jackett/torrent";
+const DEFAULT_BASE_URL: &str = "http://127.0.0.1:9117";
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Default)]
 #[serde(rename_all = "PascalCase")] 
@@ -62,15 +65,34 @@ impl TryFrom<JackettResult> for RsRequest {
 #[plugin_fn]
 pub fn infos() -> FnResult<Json<PluginInformation>> {
     Ok(Json(
-        PluginInformation { name: "jackett_lookup".into(), capabilities: vec![PluginType::Lookup, PluginType::Request], version: 1, interface_version: 1, publisher: "neckaros".into(), description: "fetch possible movies or episode with the Jackett API".into(), credential_kind: Some(CredentialType::Token), ..Default::default() }
+        PluginInformation {
+            name: "jackett_lookup".into(),
+            capabilities: vec![PluginType::Lookup, PluginType::Request],
+            version: 1,
+            interface_version: 1,
+            publisher: "neckaros".into(),
+            description: "fetch possible movies or episode with the Jackett API".into(),
+            credential_kind: Some(CredentialType::Token),
+            settings: vec![
+                CustomParam {
+                    name: "base_url".into(),
+                    param: CustomParamTypes::Url(Some(DEFAULT_BASE_URL.into())),
+                    description: Some("Jackett server base URL".into()),
+                    required: false,
+                }
+            ],
+            ..Default::default()
+        }
     ))
 }
 
 
-pub fn get_request(url: Option<&str>, token: String, params: HashMap<&str, String>) -> HttpRequest {
-    let url = url.unwrap_or("http://127.0.0.1:9117/api/v2.0/indexers/all/results");
-    
+pub fn get_request(base_url: Option<&str>, token: String, params: HashMap<&str, String>) -> HttpRequest {
+    let base_url = base_url.unwrap_or(DEFAULT_BASE_URL);
+    let url = format!("{}/api/v2.0/indexers/all/results", base_url.trim_end_matches('/'));
+
     let params_string = params.into_iter().map(|(key, value)| format!("{}={}", key, encode(&value))).collect::<Vec<_>>().join("&");
+    #[cfg(target_arch = "wasm32")]
     info!("{}?apikey={}&{}", url, token, params_string);
     HttpRequest {
         url: format!("{}?apikey={}&{}", url, token, params_string),
@@ -82,6 +104,11 @@ pub fn get_request(url: Option<&str>, token: String, params: HashMap<&str, Strin
 #[plugin_fn]
 pub fn lookup(Json(lookup): Json<RsLookupWrapper>) -> FnResult<Json<RsLookupSourceResult>> {
     if let Some(token) = lookup.credential.and_then(|l| l.password) {
+        let base_url = lookup.params
+            .as_ref()
+            .and_then(|p| p.get("base_url"))
+            .map(|s| s.as_str());
+
         if let RsLookupQuery::Episode(episode_query) = lookup.query {
             let q =  if let Some(number) = episode_query.number {
                 format!("{} s{:02}e{:02}", unidecode(&episode_query.serie), episode_query.season, number)
@@ -90,7 +117,7 @@ pub fn lookup(Json(lookup): Json<RsLookupWrapper>) -> FnResult<Json<RsLookupSour
             };
             let params = HashMap::from([("t", "tvsearch".to_owned()),("Query", q)]);
 
-            let request = get_request(None, token.clone(), params);
+            let request = get_request(base_url, token.clone(), params);
 
             let res = http::request::<()>(&request, None);
             match res {
@@ -120,8 +147,8 @@ pub fn lookup(Json(lookup): Json<RsLookupWrapper>) -> FnResult<Json<RsLookupSour
             }
         } else if let RsLookupQuery::Movie(movie_query) = lookup.query {
             let params = HashMap::from([("t", "movie".to_owned()), ("Query", unidecode(&movie_query.name))]);
-            
-            let request = get_request(None, token.clone(), params);
+
+            let request = get_request(base_url, token.clone(), params);
 
             let res = http::request::<()>(&request, None);
             match res {
@@ -247,6 +274,23 @@ mod tests {
     fn request() {
         let request = get_request(None, "testtoken".to_owned(), HashMap::from([("testparam1", "A".to_owned()), ("testparam2", "B".to_owned())]));
 
-        assert_eq!(request.url, "http://127.0.0.1:9117/?apikey=testtoken&testparam1=A&testparam2=B");
+        // HashMap iteration order is not guaranteed, so we check parts instead
+        assert!(request.url.starts_with("http://127.0.0.1:9117/api/v2.0/indexers/all/results?apikey=testtoken&"));
+        assert!(request.url.contains("testparam1=A"));
+        assert!(request.url.contains("testparam2=B"));
+    }
+
+    #[test]
+    fn request_with_custom_base_url() {
+        let request = get_request(Some("http://192.168.1.100:9117"), "testtoken".to_owned(), HashMap::from([("t", "tvsearch".to_owned())]));
+
+        assert_eq!(request.url, "http://192.168.1.100:9117/api/v2.0/indexers/all/results?apikey=testtoken&t=tvsearch");
+    }
+
+    #[test]
+    fn request_with_trailing_slash() {
+        let request = get_request(Some("http://192.168.1.100:9117/"), "testtoken".to_owned(), HashMap::from([("t", "movie".to_owned())]));
+
+        assert_eq!(request.url, "http://192.168.1.100:9117/api/v2.0/indexers/all/results?apikey=testtoken&t=movie");
     }
 }

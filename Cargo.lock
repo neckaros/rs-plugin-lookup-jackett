@@ -730,7 +730,7 @@ dependencies = [
 
 [[package]]
 name = "rs-plugin-lookup-jackett"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "extism-pdk",
  "rs-plugin-common-interfaces",
