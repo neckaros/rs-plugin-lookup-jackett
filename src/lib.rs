@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use error::JackettError;
-use extism_pdk::{http, info, plugin_fn, FnResult, HttpRequest, Json, WithReturnCode};
+use extism_pdk::{http, info, log, plugin_fn, FnResult, HttpRequest, Json, LogLevel, WithReturnCode};
 
 use rs_plugin_common_interfaces::{lookup::{RsLookupQuery, RsLookupSourceResult, RsLookupWrapper}, request::{RsRequest, RsRequestPluginRequest, RsRequestStatus}, CredentialType, PluginInformation, PluginType};
 use rs_torrent_magnet::magnet_from_torrent;
@@ -93,15 +93,30 @@ pub fn lookup(Json(lookup): Json<RsLookupWrapper>) -> FnResult<Json<RsLookupSour
             let request = get_request(None, token.clone(), params);
 
             let res = http::request::<()>(&request, None);
-            if let Ok(res) = res {
-                let r: JackettResults = res.json()?;
-                let requests: Vec<RsRequest> = r.results.into_iter().filter_map(|t| RsRequest::try_from(t).ok()).map(|mut r| {
-                    r.url = r.url.replace(&token, "#token#");
-                    r
-                } ).collect();
-                Ok(Json(RsLookupSourceResult::Requests(requests)))
-            } else {
-                Err(WithReturnCode(res.err().unwrap(), 500))
+            match res {
+                Ok(res) if res.status_code() >= 200 && res.status_code() < 300 => {
+                    match res.json::<JackettResults>() {
+                        Ok(r) => {
+                            let requests: Vec<RsRequest> = r.results.into_iter().filter_map(|t| RsRequest::try_from(t).ok()).map(|mut r| {
+                                r.url = r.url.replace(&token, "#token#");
+                                r
+                            } ).collect();
+                            Ok(Json(RsLookupSourceResult::Requests(requests)))
+                        }
+                        Err(e) => {
+                            log!(LogLevel::Error, "JSON parse error for episode lookup: {}", e);
+                            Err(WithReturnCode::new(e, 500))
+                        }
+                    }
+                }
+                Ok(res) => {
+                    log!(LogLevel::Error, "HTTP error ({}) {}: {}", request.url.replace(&token, "#token#"), res.status_code(), String::from_utf8_lossy(&res.body()));
+                    Err(WithReturnCode::new(extism_pdk::Error::msg(format!("HTTP error: {}", res.status_code())), res.status_code() as i32))
+                }
+                Err(e) => {
+                    log!(LogLevel::Error, "HTTP request failed for episode lookup: {}", e);
+                    Err(WithReturnCode(e, 500))
+                }
             }
         } else if let RsLookupQuery::Movie(movie_query) = lookup.query {
             let params = HashMap::from([("t", "movie".to_owned()), ("Query", unidecode(&movie_query.name))]);
@@ -109,15 +124,30 @@ pub fn lookup(Json(lookup): Json<RsLookupWrapper>) -> FnResult<Json<RsLookupSour
             let request = get_request(None, token.clone(), params);
 
             let res = http::request::<()>(&request, None);
-            if let Ok(res) = res {
-                let r: JackettResults = res.json()?;
-                let requests: Vec<RsRequest> = r.results.into_iter().filter_map(|t| RsRequest::try_from(t).ok()).map(|mut r| {
-                    r.url = r.url.replace(&token, "#token#");
-                    r
-                } ).collect();
-                Ok(Json(RsLookupSourceResult::Requests(requests)))
-            } else {
-                Err(WithReturnCode(res.err().unwrap(), 500))
+            match res {
+                Ok(res) if res.status_code() >= 200 && res.status_code() < 300 => {
+                    match res.json::<JackettResults>() {
+                        Ok(r) => {
+                            let requests: Vec<RsRequest> = r.results.into_iter().filter_map(|t| RsRequest::try_from(t).ok()).map(|mut r| {
+                                r.url = r.url.replace(&token, "#token#");
+                                r
+                            } ).collect();
+                            Ok(Json(RsLookupSourceResult::Requests(requests)))
+                        }
+                        Err(e) => {
+                            log!(LogLevel::Error, "JSON parse error for movie lookup: {}", e);
+                            Err(WithReturnCode::new(e, 500))
+                        }
+                    }
+                }
+                Ok(res) => {
+                    log!(LogLevel::Error, "HTTP error ({}) {}: {}", request.url.replace(&token, "#token#"), res.status_code(), String::from_utf8_lossy(&res.body()));
+                    Err(WithReturnCode::new(extism_pdk::Error::msg(format!("HTTP error: {}", res.status_code())), res.status_code() as i32))
+                }
+                Err(e) => {
+                    log!(LogLevel::Error, "HTTP request failed for movie lookup: {}", e);
+                    Err(WithReturnCode(e, 500))
+                }
             }
         } else {
             Ok(Json(RsLookupSourceResult::NotApplicable))
@@ -140,17 +170,25 @@ pub fn process(Json(request): Json<RsRequestPluginRequest>) -> FnResult<Json<RsR
                 method: Some("GET".into()),
             };
             let res = http::request::<()>(&httprequest, None);
-            if let Ok(res) = res {
-                let encoded = res.body();
-                let magnet = magnet_from_torrent(encoded);
-                let mut final_request = request.request.clone();
-                final_request.url = magnet;
-                final_request.status = RsRequestStatus::Intermediate;
-                final_request.permanent = true;
-                final_request.mime = Some("applications/x-bittorrent".to_owned());
-                Ok(Json(final_request))
-            } else {
-                Err(WithReturnCode::new(extism_pdk::Error::msg("Not supported"), 404))
+            match res {
+                Ok(res) if res.status_code() >= 200 && res.status_code() < 300 => {
+                    let encoded = res.body();
+                    let magnet = magnet_from_torrent(encoded);
+                    let mut final_request = request.request.clone();
+                    final_request.url = magnet;
+                    final_request.status = RsRequestStatus::Intermediate;
+                    final_request.permanent = true;
+                    final_request.mime = Some("applications/x-bittorrent".to_owned());
+                    Ok(Json(final_request))
+                }
+                Ok(res) => {
+                    log!(LogLevel::Error, "HTTP error (process) ({}) {}: {}", request.request.url, res.status_code(), String::from_utf8_lossy(&res.body()));
+                    Err(WithReturnCode::new(extism_pdk::Error::msg(format!("HTTP error: {}", res.status_code())), res.status_code() as i32))
+                }
+                Err(e) => {
+                    log!(LogLevel::Error, "HTTP request failed (process) for {}: {}", request.request.url, e);
+                    Err(WithReturnCode::new(extism_pdk::Error::msg("Request failed"), 500))
+                }
             }
         } else {
             Err(WithReturnCode::new(extism_pdk::Error::msg("Need token"), 401))
@@ -171,17 +209,25 @@ pub fn request_permanent(Json(request): Json<RsRequestPluginRequest>) -> FnResul
                 method: Some("GET".into()),
             };
             let res = http::request::<()>(&httprequest, None);
-            if let Ok(res) = res {
-                let encoded = res.body();
-                let magnet = magnet_from_torrent(encoded);
-                let mut final_request = request.request.clone();
-                final_request.url = magnet;
-                final_request.status = RsRequestStatus::Unprocessed;
-                final_request.permanent = true;
-                final_request.mime = Some("applications/x-bittorrent".to_owned());
-                Ok(Json(final_request))
-            } else {
-                Err(WithReturnCode::new(extism_pdk::Error::msg("Not supported"), 404))
+            match res {
+                Ok(res) if res.status_code() >= 200 && res.status_code() < 300 => {
+                    let encoded = res.body();
+                    let magnet = magnet_from_torrent(encoded);
+                    let mut final_request = request.request.clone();
+                    final_request.url = magnet;
+                    final_request.status = RsRequestStatus::Unprocessed;
+                    final_request.permanent = true;
+                    final_request.mime = Some("applications/x-bittorrent".to_owned());
+                    Ok(Json(final_request))
+                }
+                Ok(res) => {
+                    log!(LogLevel::Error, "HTTP error (request_permanent) ({}) {}: {}", request.request.url, res.status_code(), String::from_utf8_lossy(&res.body()));
+                    Err(WithReturnCode::new(extism_pdk::Error::msg(format!("HTTP error: {}", res.status_code())), res.status_code() as i32))
+                }
+                Err(e) => {
+                    log!(LogLevel::Error, "HTTP request failed (request_permanent) for {}: {}", request.request.url, e);
+                    Err(WithReturnCode::new(extism_pdk::Error::msg("Request failed"), 500))
+                }
             }
         } else {
             Err(WithReturnCode::new(extism_pdk::Error::msg("Need token"), 401))
