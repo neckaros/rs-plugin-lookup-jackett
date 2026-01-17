@@ -173,7 +173,8 @@ pub fn process(Json(request): Json<RsRequestPluginRequest>) -> FnResult<Json<RsR
             match res {
                 Ok(res) if res.status_code() >= 200 && res.status_code() < 300 => {
                     let encoded = res.body();
-                    let magnet = magnet_from_torrent(encoded);
+                    let magnet = magnet_from_torrent(encoded)
+                        .map_err(|e| WithReturnCode::new(extism_pdk::Error::msg(format!("Failed to parse torrent: {}", e)), 500))?;
                     let mut final_request = request.request.clone();
                     final_request.url = magnet;
                     final_request.status = RsRequestStatus::Intermediate;
@@ -212,7 +213,8 @@ pub fn request_permanent(Json(request): Json<RsRequestPluginRequest>) -> FnResul
             match res {
                 Ok(res) if res.status_code() >= 200 && res.status_code() < 300 => {
                     let encoded = res.body();
-                    let magnet = magnet_from_torrent(encoded);
+                    let magnet = magnet_from_torrent(encoded)
+                        .map_err(|e| WithReturnCode::new(extism_pdk::Error::msg(format!("Failed to parse torrent: {}", e)), 500))?;
                     let mut final_request = request.request.clone();
                     final_request.url = magnet;
                     final_request.status = RsRequestStatus::Unprocessed;
