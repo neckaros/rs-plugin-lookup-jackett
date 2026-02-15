@@ -110,10 +110,12 @@ pub fn lookup(Json(lookup): Json<RsLookupWrapper>) -> FnResult<Json<RsLookupSour
             .map(|s| s.as_str());
 
         if let RsLookupQuery::Episode(episode_query) = lookup.query {
+            let name = episode_query.name
+                .ok_or_else(|| WithReturnCode::new(extism_pdk::Error::msg("Not supported"), 404))?;
             let q =  if let Some(number) = episode_query.number {
-                format!("{} s{:02}e{:02}", unidecode(&episode_query.serie), episode_query.season, number)
+                format!("{} s{:02}e{:02}", unidecode(&name), episode_query.season, number)
             } else {
-                format!("{} s{:02}", unidecode(&episode_query.serie), episode_query.season)
+                format!("{} s{:02}", unidecode(&name), episode_query.season)
             };
             let params = HashMap::from([("t", "tvsearch".to_owned()),("Query", q)]);
 
@@ -146,7 +148,9 @@ pub fn lookup(Json(lookup): Json<RsLookupWrapper>) -> FnResult<Json<RsLookupSour
                 }
             }
         } else if let RsLookupQuery::Movie(movie_query) = lookup.query {
-            let params = HashMap::from([("t", "movie".to_owned()), ("Query", unidecode(&movie_query.name))]);
+            let name = movie_query.name
+                .ok_or_else(|| WithReturnCode::new(extism_pdk::Error::msg("Not supported"), 404))?;
+            let params = HashMap::from([("t", "movie".to_owned()), ("Query", unidecode(&name))]);
 
             let request = get_request(base_url, token.clone(), params);
 

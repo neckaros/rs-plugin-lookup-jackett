@@ -716,9 +716,9 @@ dependencies = [
 
 [[package]]
 name = "rs-plugin-common-interfaces"
-version = "0.20.5"
+version = "0.26.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "08d30e1d2317271d604eaca528c47d26202b6a67a9cac187f59bda1e64c12230"
+checksum = "70137ebf64bedf0844fc1dc6bf7a2a0d6a1ea835e24bfcd0611c77c7b38e87bf"
 dependencies = [
  "regex",
  "serde",
@@ -730,7 +730,7 @@ dependencies = [
 
 [[package]]
 name = "rs-plugin-lookup-jackett"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "extism-pdk",
  "rs-plugin-common-interfaces",
