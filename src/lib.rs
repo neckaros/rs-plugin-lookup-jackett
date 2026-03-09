@@ -68,7 +68,7 @@ pub fn infos() -> FnResult<Json<PluginInformation>> {
         PluginInformation {
             name: "jackett_lookup".into(),
             capabilities: vec![PluginType::Lookup, PluginType::Request],
-            version: 1,
+            version: 3,
             interface_version: 1,
             publisher: "neckaros".into(),
             description: "fetch possible movies or episode with the Jackett API".into(),
@@ -107,17 +107,22 @@ pub fn lookup(Json(lookup): Json<RsLookupWrapper>) -> FnResult<Json<RsLookupSour
         let base_url = lookup.params
             .as_ref()
             .and_then(|p| p.get("base_url"))
-            .map(|s| s.as_str());
+            .and_then(|s| match s {
+                CustomParamTypes::Url(v) | CustomParamTypes::Text(v) => v.as_deref(),
+                _ => None,
+            });
 
         if let RsLookupQuery::Episode(episode_query) = lookup.query {
             let name = episode_query.name
                 .ok_or_else(|| WithReturnCode::new(extism_pdk::Error::msg("Not supported"), 404))?;
-            let q =  if let Some(number) = episode_query.number {
-                format!("{} s{:02}e{:02}", unidecode(&name), episode_query.season, number)
-            } else {
-                format!("{} s{:02}", unidecode(&name), episode_query.season)
-            };
-            let params = HashMap::from([("t", "tvsearch".to_owned()),("Query", q)]);
+            let mut params = HashMap::from([
+                ("t", "tvsearch".to_owned()),
+                ("Query", unidecode(&name)),
+                ("Season", episode_query.season.to_string()),
+            ]);
+            if let Some(number) = episode_query.number {
+                params.insert("Ep", number.to_string());
+            }
 
             let request = get_request(base_url, token.clone(), params);
 

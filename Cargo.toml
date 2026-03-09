@@ -1,6 +1,6 @@
 [package]
 name = "rs-plugin-lookup-jackett"
-version = "0.3.1"
+version = "0.3.2"
 edition = "2021"
 
 [lib]
@@ -9,7 +9,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 extism-pdk = "1.4.1"
-rs-plugin-common-interfaces = "0.27.3"
+rs-plugin-common-interfaces = "0.34.3"
 serde = "1.0.197"
 strum = "0.27.2"
 strum_macros = "0.27.2"
