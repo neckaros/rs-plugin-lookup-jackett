@@ -71,6 +71,7 @@ pub fn infos() -> FnResult<Json<PluginInformation>> {
             version: 3,
             interface_version: 1,
             publisher: "neckaros".into(),
+            repo: Some("https://github.com/neckaros/rs-plugin-lookup-jackett".to_string()),
             description: "fetch possible movies or episode with the Jackett API".into(),
             credential_kind: Some(CredentialType::Token),
             settings: vec![
