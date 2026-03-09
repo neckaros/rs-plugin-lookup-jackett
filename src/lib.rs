@@ -42,8 +42,6 @@ pub struct JackettResult {
     pub magnet_uri: Option<String>,
     pub size: Option<u64>,
     pub seeders: u64,
-    pub tmdb: Option<u64>,
-    pub imdb: Option<String>
 }
 
 impl TryFrom<JackettResult> for RsRequest {
@@ -68,7 +66,7 @@ pub fn infos() -> FnResult<Json<PluginInformation>> {
         PluginInformation {
             name: "jackett_lookup".into(),
             capabilities: vec![PluginType::Lookup, PluginType::Request],
-            version: 3,
+            version: 4,
             interface_version: 1,
             publisher: "neckaros".into(),
             repo: Some("https://github.com/neckaros/rs-plugin-lookup-jackett".to_string()),
