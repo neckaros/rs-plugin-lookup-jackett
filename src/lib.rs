@@ -66,7 +66,7 @@ pub fn infos() -> FnResult<Json<PluginInformation>> {
         PluginInformation {
             name: "jackett_lookup".into(),
             capabilities: vec![PluginType::Lookup, PluginType::Request],
-            version: 4,
+            version: 5,
             interface_version: 1,
             publisher: "neckaros".into(),
             repo: Some("https://github.com/neckaros/rs-plugin-lookup-jackett".to_string()),
@@ -112,13 +112,17 @@ pub fn lookup(Json(lookup): Json<RsLookupWrapper>) -> FnResult<Json<RsLookupSour
             });
 
         if let RsLookupQuery::Episode(episode_query) = lookup.query {
-            let name = episode_query.name
-                .ok_or_else(|| WithReturnCode::new(extism_pdk::Error::msg("Not supported"), 404))?;
             let mut params = HashMap::from([
                 ("t", "tvsearch".to_owned()),
-                ("Query", unidecode(&name)),
                 ("Season", episode_query.season.to_string()),
             ]);
+            if let Some(imdb) = episode_query.ids.as_ref().and_then(|ids| ids.imdb()) {
+                params.insert("imdbid", imdb.to_owned());
+            } else if let Some(name) = episode_query.name.as_ref() {
+                params.insert("Query", unidecode(name));
+            } else {
+                return Err(WithReturnCode::new(extism_pdk::Error::msg("Not supported"), 404));
+            }
             if let Some(number) = episode_query.number {
                 params.insert("Ep", number.to_string());
             }
@@ -130,7 +134,9 @@ pub fn lookup(Json(lookup): Json<RsLookupWrapper>) -> FnResult<Json<RsLookupSour
                 Ok(res) if res.status_code() >= 200 && res.status_code() < 300 => {
                     match res.json::<JackettResults>() {
                         Ok(r) => {
-                            let requests: Vec<RsRequest> = r.results.into_iter().filter_map(|t| RsRequest::try_from(t).ok()).map(|mut r| {
+                            let mut results = r.results;
+                            results.sort_by(|a, b| b.seeders.cmp(&a.seeders));
+                            let requests: Vec<RsRequest> = results.into_iter().filter_map(|t| RsRequest::try_from(t).ok()).map(|mut r| {
                                 r.url = r.url.replace(&token, "#token#");
                                 r
                             } ).collect();
@@ -152,9 +158,14 @@ pub fn lookup(Json(lookup): Json<RsLookupWrapper>) -> FnResult<Json<RsLookupSour
                 }
             }
         } else if let RsLookupQuery::Movie(movie_query) = lookup.query {
-            let name = movie_query.name
-                .ok_or_else(|| WithReturnCode::new(extism_pdk::Error::msg("Not supported"), 404))?;
-            let params = HashMap::from([("t", "movie".to_owned()), ("Query", unidecode(&name))]);
+            let mut params = HashMap::from([("t", "movie".to_owned())]);
+            if let Some(imdb) = movie_query.ids.as_ref().and_then(|ids| ids.imdb()) {
+                params.insert("imdbid", imdb.to_owned());
+            } else if let Some(name) = movie_query.name.as_ref() {
+                params.insert("Query", unidecode(name));
+            } else {
+                return Err(WithReturnCode::new(extism_pdk::Error::msg("Not supported"), 404));
+            }
 
             let request = get_request(base_url, token.clone(), params);
 
@@ -163,7 +174,9 @@ pub fn lookup(Json(lookup): Json<RsLookupWrapper>) -> FnResult<Json<RsLookupSour
                 Ok(res) if res.status_code() >= 200 && res.status_code() < 300 => {
                     match res.json::<JackettResults>() {
                         Ok(r) => {
-                            let requests: Vec<RsRequest> = r.results.into_iter().filter_map(|t| RsRequest::try_from(t).ok()).map(|mut r| {
+                            let mut results = r.results;
+                            results.sort_by(|a, b| b.seeders.cmp(&a.seeders));
+                            let requests: Vec<RsRequest> = results.into_iter().filter_map(|t| RsRequest::try_from(t).ok()).map(|mut r| {
                                 r.url = r.url.replace(&token, "#token#");
                                 r
                             } ).collect();
@@ -300,5 +313,20 @@ mod tests {
         let request = get_request(Some("http://192.168.1.100:9117/"), "testtoken".to_owned(), HashMap::from([("t", "movie".to_owned())]));
 
         assert_eq!(request.url, "http://192.168.1.100:9117/api/v2.0/indexers/all/results?apikey=testtoken&t=movie");
+    }
+
+    #[test]
+    fn request_with_imdbid() {
+        let request = get_request(None, "testtoken".to_owned(), HashMap::from([
+            ("t", "tvsearch".to_owned()),
+            ("imdbid", "tt14824792".to_owned()),
+            ("Season", "2".to_owned()),
+            ("Ep", "7".to_owned()),
+        ]));
+
+        assert!(request.url.contains("imdbid=tt14824792"));
+        assert!(request.url.contains("t=tvsearch"));
+        assert!(request.url.contains("Season=2"));
+        assert!(request.url.contains("Ep=7"));
     }
 }
