@@ -7,6 +7,11 @@ use rs_plugin_common_interfaces::{
 };
 use std::collections::HashMap;
 
+#[path = "../src/episode_filter.rs"]
+mod episode_filter;
+
+use episode_filter::{title_matches_episode, title_matches_season};
+
 const DEFAULT_JACKETT_URL: &str = "https://nseat-jackett.jezequel.org/";
 const DEFAULT_JACKETT_TOKEN: &str = "3gk0bdlkiek33tozyz3q80uq2tgk7xfz";
 
@@ -68,7 +73,7 @@ fn test_infos() {
         serde_json::from_slice(output).expect("Failed to parse infos JSON");
 
     assert_eq!(info["name"], "jackett_lookup");
-    assert_eq!(info["version"], 4);
+    assert_eq!(info["version"], 7);
     println!("\n=== Plugin info ===\n{}", serde_json::to_string_pretty(&info).unwrap());
 }
 
@@ -141,6 +146,81 @@ fn test_lookup_episode_invincible_with_imdb() {
         .collect();
     let invincible_count = top_results.iter().filter(|f| f.to_lowercase().contains("invincible")).count();
     assert!(invincible_count >= 3, "Most top results should be 'Invincible' (got {}/{}). Results: {:?}", invincible_count, top_results.len(), top_results);
+}
+
+#[test]
+fn test_lookup_episode_from_filters_other_seasons() {
+    let mut plugin = build_plugin();
+
+    let input = RsLookupWrapper {
+        query: RsLookupQuery::Episode(RsLookupEpisode {
+            name: Some("From".to_string()),
+            ids: Some(RsIds::from_imdb("tt9813792".to_string())),
+            season: 1,
+            number: Some(1),
+            page_key: None,
+        }),
+        credential: make_credential(),
+        params: make_params(),
+    };
+
+    let requests = extract_requests(call_lookup(&mut plugin, &input));
+
+    assert!(
+        requests.iter().any(|request| {
+            request.filename.as_deref()
+                == Some("From.S01.MULTI.VFI.2160p.WEB.EAC3.5.1.HEVC-HYPERION")
+        }),
+        "The matching S01 season pack should be returned"
+    );
+    assert!(
+        requests.iter().any(|request| {
+            request.filename.as_deref()
+                == Some("From.2022.S01.VFF.1080p.WEBRip.EAC3.5.1.AV1-MonoDiSC")
+        }),
+        "The matching S01 season pack with a year should be returned"
+    );
+    assert!(
+        requests.iter().all(|request| {
+            request
+                .filename
+                .as_deref()
+                .is_some_and(|title| title_matches_episode(title, 1, 1))
+        }),
+        "Every returned result must match From S01E01: {:?}",
+        requests
+    );
+}
+
+#[test]
+fn test_lookup_from_season_filters_other_seasons() {
+    let mut plugin = build_plugin();
+
+    let input = RsLookupWrapper {
+        query: RsLookupQuery::Episode(RsLookupEpisode {
+            name: Some("From".to_string()),
+            ids: Some(RsIds::from_imdb("tt9813792".to_string())),
+            season: 1,
+            number: None,
+            page_key: None,
+        }),
+        credential: make_credential(),
+        params: make_params(),
+    };
+
+    let requests = extract_requests(call_lookup(&mut plugin, &input));
+
+    assert!(!requests.is_empty(), "The From S01 lookup should return results");
+    assert!(
+        requests.iter().all(|request| {
+            request
+                .filename
+                .as_deref()
+                .is_some_and(|title| title_matches_season(title, 1))
+        }),
+        "Every returned result must include From season 1: {:?}",
+        requests
+    );
 }
 
 #[test]

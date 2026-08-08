@@ -12,7 +12,10 @@ use serde::{Deserialize, Serialize};
 use urlencoding::encode;
 use unidecode::unidecode;
 
+mod episode_filter;
 pub mod error;
+
+use episode_filter::{title_matches_episode, title_matches_season};
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Default)]
 #[serde(rename_all = "PascalCase")] 
@@ -66,7 +69,7 @@ pub fn infos() -> FnResult<Json<PluginInformation>> {
         PluginInformation {
             name: "jackett_lookup".into(),
             capabilities: vec![PluginType::Lookup, PluginType::Request],
-            version: 5,
+            version: 7,
             interface_version: 1,
             publisher: "neckaros".into(),
             repo: Some("https://github.com/neckaros/rs-plugin-lookup-jackett".to_string()),
@@ -135,6 +138,17 @@ pub fn lookup(Json(lookup): Json<RsLookupWrapper>) -> FnResult<Json<RsLookupSour
                     match res.json::<JackettResults>() {
                         Ok(r) => {
                             let mut results = r.results;
+                            results.retain(|result| match episode_query.number {
+                                Some(number) => title_matches_episode(
+                                    &result.title,
+                                    episode_query.season,
+                                    number,
+                                ),
+                                None => title_matches_season(
+                                    &result.title,
+                                    episode_query.season,
+                                ),
+                            });
                             results.sort_by(|a, b| b.seeders.cmp(&a.seeders));
                             let requests: Vec<RsRequest> = results.into_iter().filter_map(|t| RsRequest::try_from(t).ok()).map(|mut r| {
                                 r.url = r.url.replace(&token, "#token#");
